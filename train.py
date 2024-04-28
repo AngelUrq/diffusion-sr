@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -13,6 +14,7 @@ def train(
     epochs,
     device,
     optimizer,
+    scheduler,
     criterion,
     tensorboard_path="./runs/diffusion",
 ):
@@ -25,24 +27,24 @@ def train(
         
         for i, (X, y) in enumerate(train_loader):
             batch_size = X.size(0)
-
+            
             timesteps = torch.randint(0, diffusion_scheduler.T, (batch_size,)).long()
-            noise = torch.randn_like(X)
+            noise = torch.randn_like(y)
 
-            noisy_images = diffusion_scheduler.add_noise(X, timesteps, noise)
-
+            noisy_images = diffusion_scheduler.add_noise(y, timesteps, noise)
+            noisy_images = torch.cat([noisy_images, X], dim=1).to(device)
+                
             noise = noise.to(device)
-            noisy_images = noisy_images.to(device)
 
             predicted_noise = model(noisy_images, timesteps.to(device))
 
             loss = criterion(noise, predicted_noise)
-
+            
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             
-            ema.update(model)
+            #ema.update(model)
 
             if i % 50 == 0:
                 print(f"Epoch {epoch} Iteration {i} Loss {loss.item()}")
@@ -51,23 +53,28 @@ def train(
                 tb_writer.add_scalar(
                     "Loss/train", loss.item(), epoch * len(train_loader) + i
                 )
-
-                break
         
-        evaluate(model, diffusion_scheduler, val_loader, device, criterion, epoch)
+        evaluate(model, diffusion_scheduler, val_loader, scheduler, device, criterion, epoch, tensorboard_path)
 
     print("Sampling final image")
-    samples = diffusion_scheduler.sample_image(model)
+    tb_writer = SummaryWriter(tensorboard_path)
+    X, y = next(iter(val_loader))
+    X = X[0].unsqueeze(0).to(device)
+    y = y[0].to(device)
+
+    samples = diffusion_scheduler.generate(unet, X)
+
+    X[0] = (X[0] + 1) / 2
+    y = (y + 1) / 2
 
     for i, sample in enumerate(samples):
-        sample = (sample.clamp(-1, 1) + 1) / 2
-        sample = (sample * 255).type(torch.uint8)
+        grid_images = torchvision.utils.make_grid([X[0].cpu(), sample[0].cpu(), y.cpu()], nrow=3)
 
-        tb_writer.add_image("Final sample image", sample, i)
+        tb_writer.add_image("Final sample image", grid_images, i)
 
 @torch.no_grad()
 def evaluate(
-    model, diffusion_scheduler, val_loader, device, criterion, epoch, tensorboard_path="./runs/diffusion"
+    model, diffusion_scheduler, val_loader, scheduler, device, criterion, epoch, tensorboard_path="./runs/diffusion"
 ):
     tb_writer = SummaryWriter(tensorboard_path)
     model.eval()
@@ -81,23 +88,33 @@ def evaluate(
         noise = torch.randn_like(X)
 
         noisy_images = diffusion_scheduler.add_noise(X, timesteps, noise)
+        noisy_images = torch.cat([noisy_images, X], dim=1).to(device)
 
         noise = noise.to(device)
         noisy_images = noisy_images.to(device)
 
         predicted_noise = model(noisy_images, timesteps.to(device))
 
-        loss = criterion(noise, predicted_noise)
+        loss = criterion(noise, predicted_noise) 
         total_loss += loss.item()
 
     tb_writer.add_scalar("Loss/val", total_loss / len(val_loader), epoch)
+    scheduler.step(total_loss / len(val_loader))
 
     print(f"Epoch {epoch} Validation Loss {total_loss / len(val_loader)}")
 
-    if epoch % 3 == 0:
+    if epoch % 1 == 0:
         print("Sampling image")
-        samples = diffusion_scheduler.sample_image(model)
-        sample = (samples[-1].clamp(-1, 1) + 1) / 2
-        sample = (sample * 255).type(torch.uint8)
+        X, y = next(iter(val_loader))
+        X = X[0].unsqueeze(0).to(device)
+        y = y[0].to(device)
+        
+        samples = diffusion_scheduler.generate(model, X)[-1]
+        sample = samples[0]
 
-        tb_writer.add_image("Sample image", sample, epoch)
+        X = (X + 1) / 2
+        y = (y + 1) / 2
+        
+        grid_images = torchvision.utils.make_grid([X[0].cpu(), sample.cpu(), y.cpu()], nrow=3)
+        tb_writer.add_image("Sample image", grid_images, epoch)
+        

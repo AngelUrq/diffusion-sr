@@ -185,7 +185,13 @@ class ExponentialMovingAverage:
     def __init__(self, model, beta=0.99):
         self.model = model
         self.beta = beta
+        self.step = 0
 
-    def update(self, model):
-        for p1, p2 in zip(self.model.parameters(), model.parameters()):
-            p1.data = self.beta * p1.data + (1 - self.beta) * p2.data
+    def update(self, model, start=500):
+        self.step += 1
+        
+        if self.step < start:
+            self.model.load_state_dict(model.state_dict())
+        else:
+            for p1, p2 in zip(self.model.parameters(), model.parameters()):
+                p1.data = self.beta * p1.data + (1 - self.beta) * p2.data
