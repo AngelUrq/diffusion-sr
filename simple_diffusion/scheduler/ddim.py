@@ -155,14 +155,15 @@ class DDIMScheduler:
                  generator=None,
                  eta=1.0,
                  use_clipped_model_output=True,
-                 num_inference_steps=50,
+                 image_size=128,
+                 num_inference_steps=100,
                  output_type="pil",
                  device=None):
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
         image = torch.randn(
-            (batch_size, 3, 128, 128),
+            (batch_size, 3, image_size, image_size),
             generator=generator,
         )
         image = image.to(device)

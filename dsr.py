@@ -6,6 +6,7 @@ import torchvision
 import json
 import os
 import cv2
+import random
 
 from pathlib import Path
 from PIL import Image
@@ -16,10 +17,11 @@ class DSRDataset(torch.utils.data.Dataset):
     DEFAULT_IMAGE = 'hasselblad0.png'
     DEFAULT_TARGET = 'tele.png'
     
-    def __init__(self, root, scenes, height=None, transform=None):
+    def __init__(self, root, scenes, height=None, transform=None, resolution=128):
         self.root = root
         self.transform = transform
         self.scenes = scenes
+        self.resolution = resolution
 
         self.pairs = []
 
@@ -59,26 +61,27 @@ class DSRDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.pairs)
     
-    """
+    
     def __getitem__(self, idx):
         image_path, target_path = self.pairs[idx]
         image = self.load_image(image_path) / 255.0
         target = self.load_image(target_path) / 255.0
-        
-        #image = cv2.resize(image, (target.shape[0], target.shape[1]), interpolation=cv2.INTER_LINEAR)
+
         image = cv2.resize(image, (target.shape[0], target.shape[1]), interpolation=cv2.INTER_LINEAR)
-        image = cv2.GaussianBlur(image, (3, 3), 0)
-        
-        image = cv2.resize(image[:512, :512], (128, 128), interpolation=cv2.INTER_AREA)
-        target = cv2.resize(target[:512, :512], (128, 128), interpolation=cv2.INTER_AREA)
-        
-        image = np.clip(image, 0, 1)
-        target = np.clip(target, 0, 1)
+
+        h, w, _ = image.shape
+        crop_size = self.resolution
+        x = random.randint(0, w - crop_size)
+        y = random.randint(0, h - crop_size)
+
+        image = image[y:y+crop_size, x:x+crop_size]
+        target = target[y:y+crop_size, x:x+crop_size]
 
         image = torch.tensor((image - 0.5) / 0.5).permute(2, 0, 1).float()
         target = torch.tensor((target - 0.5) / 0.5).permute(2, 0, 1).float()
-
+        
         return image, target
+
     """
     def __getitem__(self, idx):
         image_path, target_path = self.pairs[idx]
@@ -103,3 +106,4 @@ class DSRDataset(torch.utils.data.Dataset):
         target = torch.tensor(target).permute(2, 0, 1).float()
 
         return upscaled_image, target
+    """
