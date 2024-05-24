@@ -31,6 +31,7 @@ MANIFEST
 
 flowers/
 .vscode/
+Image-Super-Resolution-via-Iterative-Refinement/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

@@ -75,22 +75,22 @@ class ResidualBlock(nn.Module):
                                stride=stride,
                                padding=padding)
 
-        self.norm1 = nn.GroupNorm(num_channels=out_channels, num_groups=groups)
-        self.norm2 = nn.GroupNorm(num_channels=out_channels, num_groups=groups)
+        #self.norm1 = nn.BatchNorm2d(num_features=out_channels)
+        #self.norm2 = nn.BatchNorm2d(num_features=out_channels)
         self.nonlinearity = nn.SiLU()
 
     def forward(self, x, temb):
         residual = self.residual_conv(x)
 
         x = self.conv1(x)
-        x = self.norm1(x)
+        #x = self.norm1(x)
         x = self.nonlinearity(x)
 
         temb = self.time_emb_proj(self.nonlinearity(temb))
         x += temb[:, :, None, None]
 
         x = self.conv2(x)
-        x = self.norm2(x)
+        #x = self.norm2(x)
         x = self.nonlinearity(x)
 
         return x + residual

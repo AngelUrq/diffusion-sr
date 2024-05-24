@@ -14,7 +14,7 @@ from PIL import Image
 class DSRDataset(torch.utils.data.Dataset):
 
     ALTITUDES = (10, 20, 30, 40, 50, 70, 80, 100, 120, 140)
-    DEFAULT_IMAGE = 'hasselblad0.png'
+    DEFAULT_IMAGE = 'color_correction.png'
     DEFAULT_TARGET = 'tele.png'
     
     def __init__(self, root, scenes, height=None, transform=None, resolution=128):
@@ -66,21 +66,29 @@ class DSRDataset(torch.utils.data.Dataset):
         image_path, target_path = self.pairs[idx]
         image = self.load_image(image_path) / 255.0
         target = self.load_image(target_path) / 255.0
-
-        image = cv2.resize(image, (target.shape[0], target.shape[1]), interpolation=cv2.INTER_LINEAR)
-
+        
         h, w, _ = image.shape
-        crop_size = self.resolution
+        target_size = 128
+        ratio = target.shape[0] / image.shape[0]
+        
+        crop_size = int(target_size / ratio)
+        
         x = random.randint(0, w - crop_size)
         y = random.randint(0, h - crop_size)
+        
+        crop = image[y:y+crop_size, x:x+crop_size]
+        crop_resized = cv2.resize(crop, (target_size, target_size), interpolation=cv2.INTER_LINEAR)  
+        
+        x = int(x * ratio)
+        y = int(y * ratio)
 
-        image = image[y:y+crop_size, x:x+crop_size]
-        target = target[y:y+crop_size, x:x+crop_size]
-
-        image = torch.tensor((image - 0.5) / 0.5).permute(2, 0, 1).float()
+        target = target[y:y+target_size, x:x+target_size]
+        
+        crop = torch.tensor((crop - 0.5) / 0.5).permute(2, 0, 1).float()
+        crop_resized = torch.tensor((crop_resized - 0.5) / 0.5).permute(2, 0, 1).float()
         target = torch.tensor((target - 0.5) / 0.5).permute(2, 0, 1).float()
         
-        return image, target
+        return crop_resized, target
 
     """
     def __getitem__(self, idx):
