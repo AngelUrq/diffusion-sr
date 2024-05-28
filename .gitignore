@@ -5,6 +5,9 @@ __pycache__/
 dsr/
 flowers/
 runs/
+logs/
+
+*.pth
 
 # C extensions
 *.so

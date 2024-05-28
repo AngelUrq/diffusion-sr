@@ -175,7 +175,7 @@ class DDIMScheduler:
         for t in tqdm(self.timesteps):
             # 1. predict noise model_output
             conditioned_image = torch.cat([image, X], dim=1).to(device)
-            model_output = model(conditioned_image, t)
+            model_output = model(conditioned_image, t)[0]
 
             # 2. predict previous mean of image x_t-1 and add variance depending on eta
             # do x_t -> x_t-1

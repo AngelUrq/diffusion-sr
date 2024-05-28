@@ -13,6 +13,7 @@ from torchmetrics.image import PeakSignalNoiseRatio
 
 from simple_diffusion.scheduler import DDIMScheduler
 from srd import SuperResolutionDataset
+from diffusers import UNet2DModel
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -70,7 +71,7 @@ def train(
             noise = noise.to(device)
             
             with torch.cuda.amp.autocast(dtype=torch.float16):
-                predicted_noise = model(noisy_images, timesteps.to(device))
+                predicted_noise = model(noisy_images, timesteps.to(device))[0]
                 loss = criterion(noise, predicted_noise)
             
             scaler.scale(loss / num_accumulation_steps).backward()
@@ -87,6 +88,11 @@ def train(
                 tb_writer.add_scalar(
                     "Loss/train", loss.item(), epoch * len(train_loader) + i
                 )
+        
+        for param_group in optimizer.param_groups:
+            current_lr = param_group['lr']
+            tb_writer.add_scalar("Learning Rate", current_lr, epoch)
+            break
         
         evaluate(model, diffusion_scheduler, val_loader, scheduler, device, criterion, epoch, tensorboard_path)
 
@@ -126,7 +132,7 @@ def evaluate(
         noise = noise.to(device)
         noisy_images = noisy_images.to(device)
 
-        predicted_noise = model(noisy_images, timesteps.to(device))
+        predicted_noise = model(noisy_images, timesteps.to(device))[0]
 
         loss = criterion(noise, predicted_noise)
         
@@ -178,8 +184,8 @@ if __name__ == "__main__":
     with open(root / 'train_valid_test_split.json', 'r') as f:
         split = json.load(f)
     
-    train_dataset = DSRDataset(root, split['train'], resolution=128)
-    val_dataset = DSRDataset(root, split['test'], resolution=128)
+    train_dataset = DSRDataset(root, split['train'], resolution=128, real_lr=True)
+    val_dataset = DSRDataset(root, split['test'], resolution=128, real_lr=True)
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -198,18 +204,39 @@ if __name__ == "__main__":
     )
     
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    unet = UNet(hidden_dims=[32, 64, 128, 256, 512], image_size=128).to(device)
-    optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-5,betas=(0.9, 0.99),weight_decay=0.0)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
+    unet = UNet2DModel(
+        sample_size=128,  # the target image resolution
+        in_channels=6,  # the number of input channels, 3 for RGB images
+        out_channels=3,  # the number of output channels
+        layers_per_block=3,  # how many ResNet layers to use per UNet block
+        block_out_channels=(128, 256, 512, 1024, 1024),  # the number of output channels for each UNet block
+        norm_num_groups=1,
+        down_block_types=(
+            "DownBlock2D",  # a regular ResNet downsampling block
+            "AttnDownBlock2D",  # a ResNet downsampling block with spatial self-attention
+            "DownBlock2D",
+            "AttnDownBlock2D",
+            "DownBlock2D"
+        ),
+        up_block_types=(
+            "UpBlock2D",  # a regular ResNet upsampling block
+            "AttnUpBlock2D",  # a ResNet upsampling block with spatial self-attention
+            "UpBlock2D",
+            "AttnUpBlock2D",
+            "UpBlock2D"
+        ),
+    ).to(device)
+    optimizer = torch.optim.AdamW(unet.parameters(), lr=1e-4,betas=(0.9, 0.99),weight_decay=0.0)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5)
     criterion = nn.MSELoss()
-    epochs = 100
+    epochs = 125
     T = 2000
     diffusion_scheduler = DDIMScheduler(beta_schedule="cosine")
-    tensorboard_path="./runs/diffusion-33M-dsr2-bn-color-cosine-1e-5"
+    tensorboard_path="./runs/diffusion-525M-dsr-true-nogroup-128R-cosine-1e-4"
 
     num_params = sum(p.numel() for p in unet.parameters() if p.requires_grad)
     print("Number of parameters:", num_params, device)
     
-    train(unet, diffusion_scheduler, train_loader, val_loader, epochs, device, optimizer, scheduler, criterion, tensorboard_path, num_accumulation_steps=2)
+    train(unet, diffusion_scheduler, train_loader, val_loader, epochs, device, optimizer, scheduler, criterion, tensorboard_path, num_accumulation_steps=4)
     torch.save(unet.state_dict(), 'dsr_sr.pth')
     

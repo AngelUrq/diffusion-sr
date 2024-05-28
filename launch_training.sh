@@ -2,10 +2,11 @@
 
 echo "Starting training..."
 
-export WANDB_API_KEY=e7c0a6928e86657f120e972e1a3179aa50641d2d
+pip install torchmetrics
+pip install diffusers
 
-pip install -r requirement.txt
+tensorboard --logdir /scratch/students/2024-spring-sp-azenteno/diffusion-sr/runs/ &
 
-pip install wandb
+echo "$(nvidia-smi)"
 
-python sr.py -p train -c config/sr_sr3_16_128.json -enable_wandb
+python train.py
