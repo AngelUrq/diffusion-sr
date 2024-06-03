@@ -70,7 +70,7 @@ class DSRDataset(torch.utils.data.Dataset):
             target = self.load_image(target_path) / 255.0
 
             h, w, _ = image.shape
-            target_size = 128
+            target_size = self.resolution
             ratio = target.shape[0] / image.shape[0]
 
             crop_size = int(target_size / ratio)
@@ -98,7 +98,7 @@ class DSRDataset(torch.utils.data.Dataset):
             image = target[:512, :512]
             target = target[:512, :512]
 
-            target = cv2.resize(target, (128, 128), interpolation=cv2.INTER_AREA)
+            target = cv2.resize(target, (self.resolution, self.resolution), interpolation=cv2.INTER_AREA)
             image_size = target.shape[0]
 
             blurred_image = cv2.GaussianBlur(image, (3, 3), 0)

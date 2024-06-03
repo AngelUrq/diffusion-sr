@@ -75,8 +75,8 @@ class ResidualBlock(nn.Module):
                                stride=stride,
                                padding=padding)
 
-        #self.norm1 = nn.BatchNorm2d(num_features=out_channels)
-        #self.norm2 = nn.BatchNorm2d(num_features=out_channels)
+        self.norm1 = nn.BatchNorm2d(num_features=out_channels)
+        self.norm2 = nn.BatchNorm2d(num_features=out_channels)
         self.nonlinearity = nn.SiLU()
 
     def forward(self, x, temb):
