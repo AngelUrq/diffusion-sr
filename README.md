@@ -9,8 +9,6 @@ This repository contains the implementation of a diffusion model for super-resol
   - [Running Training](#running-training)
   - [Changing Hyperparameters](#changing-hyperparameters)
 - [Inference](#inference)
-- [Contributing](#contributing)
-- [License](#license)
 
 ## Installation
 
@@ -19,6 +17,7 @@ This repository contains the implementation of a diffusion model for super-resol
     git clone https://github.com/AngelUrq/diffusion-sr.git
     cd diffusion-sr
     ```
+2. Download the DSR data and place it in the root folder of the repository.
 
 ## Usage
 
@@ -53,4 +52,6 @@ Pre-trained models are available in the `models` folder. To perform inference us
 ```bash
 jupyter notebook super_resolution.ipynb
 ```
-This notebook contains code to load the pre-trained models and apply them to your images for super-resolution.
+This notebook contains code to load the pre-trained models and apply them to your images for super-resolution. Note that this method works for models trained with artificial images.
+
+For inference with models trained on real data, we use the [Image-Super-Resolution-via-Iterative-Refinement](https://github.com/Janspiry/Image-Super-Resolution-via-Iterative-Refinement) GitHub repository. We chose this approach to validate our model by testing it with different codebases. In this case, you need to modify `config/sr_sr3_16_128.json`. We have already adjusted this config to load our latest checkpoint. Instructions for running the model can be found in the README of that repository.
