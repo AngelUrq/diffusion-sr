@@ -13,7 +13,7 @@ from torchmetrics.image import PeakSignalNoiseRatio
 
 from diffusers import UNet2DModel, DDIMScheduler
 from srd import SuperResolutionDataset
-from diffusers.optimization import get_cosine_schedule_with_warmup, get_constant_schedule
+from diffusers.optimization import get_cosine_schedule_with_warmup, get_constant_schedule, get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,33 +29,11 @@ import json
 import time
 
 from PIL import Image
-from dsr import DSRDataset
+from dsr_height import DSRDataset
 from pathlib import Path
 from accelerate import Accelerator
 
 from samplers import DDIMPipeline 
-
-def save_checkpoint(model, optimizer, epoch, checkpoint_path='checkpoints'):
-    os.makedirs(checkpoint_path, exist_ok=True)
-    checkpoint_file = os.path.join(checkpoint_path, f"checkpoint_epoch_{epoch}.pt")
-    torch.save({
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict()
-    }, checkpoint_file)
-    print(f"Checkpoint saved at {checkpoint_file}")
-    
-def load_checkpoint(checkpoint_file, model, optimizer):
-    if os.path.isfile(checkpoint_file):
-        checkpoint = torch.load(checkpoint_file)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint['epoch']
-        print(f"Checkpoint loaded from {checkpoint_file}, starting from epoch {start_epoch}")
-        return start_epoch
-    else:
-        print(f"No checkpoint found at {checkpoint_file}")
-        return 0
 
 def train(
     model,
@@ -68,7 +46,8 @@ def train(
     lr_scheduler,
     criterion,
     tensorboard_path="./runs/diffusion",
-    num_accumulation_steps=1
+    num_accumulation_steps=1,
+    altitude_conditioning=False,
 ):
     print("Starting training for", epochs, "epochs")
     print("Accumulation steps:", num_accumulation_steps)
@@ -76,7 +55,6 @@ def train(
     tb_writer = SummaryWriter(tensorboard_path)
     train_losses = []
     
-
     accelerator = Accelerator(
         mixed_precision='fp16',
         gradient_accumulation_steps=num_accumulation_steps
@@ -85,11 +63,11 @@ def train(
     model, optimizer, train_loader, lr_scheduler = accelerator.prepare(
         model, optimizer, train_loader, lr_scheduler
     )
-    
+        
     for epoch in tqdm(range(epochs)):
         model.train()
         
-        for i, (X, y) in enumerate(train_loader):
+        for i, (X, y, altitudes) in enumerate(train_loader):
             batch_size = X.size(0)
             
             timesteps = torch.randint(0, len(diffusion_scheduler.timesteps), (batch_size,)).long()
@@ -99,15 +77,19 @@ def train(
             noisy_images = torch.cat([noisy_images, X], dim=1).to(device)
 
             noise = noise.to(device)
+            altitudes = altitudes.to(device)
+            timesteps = timesteps.to(device)
             
             with accelerator.accumulate(model):
-                predicted_noise = model(noisy_images, timesteps.to(device))[0]
+                if altitude_conditioning:
+                    predicted_noise = model(noisy_images, timesteps, class_labels=altitudes)[0]
+                else:
+                    predicted_noise = model(noisy_images, timesteps)[0]
+                    
                 loss = criterion(noise, predicted_noise)
 
                 accelerator.backward(loss)
-                #loss.backward()
-
-                #accelerator.clip_grad_norm_(model.parameters(), 1.0)
+                
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
@@ -120,28 +102,33 @@ def train(
                     "Loss/train", loss.detach().item(), epoch * len(train_loader) + i
                 )
                 
-                for param_group in optimizer.param_groups:
-                    current_lr = param_group['lr']
-                    tb_writer.add_scalar(
-                        "Learning Rate", current_lr, epoch * len(train_loader) + i
-                    )
+        for param_group in optimizer.param_groups:
+            current_lr = param_group['lr']
+            tb_writer.add_scalar("Learning Rate", current_lr, epoch)
+            break
         
-        evaluate(model, diffusion_scheduler, val_loader, lr_scheduler, device, criterion, epoch, tensorboard_path)
-        
-        if epoch  % 50 == 0:
-            save_checkpoint(accelerator.unwrap_model(model), optimizer, epoch)
+        evaluate(accelerator.unwrap_model(model), diffusion_scheduler, val_loader, lr_scheduler, device, criterion, epoch, tensorboard_path, altitude_conditioning=altitude_conditioning)
 
     print("Sampling final images")
-    X, y = next(iter(val_loader))
+    X, y, altitudes = next(iter(val_loader))
     X = X.to(device)
     y = y.to(device)
+    altitudes = altitudes.to(device)
 
     pipeline = DDIMPipeline(unet=accelerator.unwrap_model(model), scheduler=diffusion_scheduler)
-    generated_images = pipeline(
-        X,
-        batch_size=X.shape[0],
-        num_inference_steps=100
-    )
+    if altitude_conditioning:
+        generated_images = pipeline(
+            X,
+            altitudes=altitudes,
+            batch_size=X.shape[0],
+            num_inference_steps=100
+        )
+    else:
+        generated_images = pipeline(
+            X,
+            batch_size=X.shape[0],
+            num_inference_steps=100
+        )
     
     X = (X + 1) / 2
     y = (y + 1) / 2
@@ -153,14 +140,14 @@ def train(
 
 @torch.no_grad()
 def evaluate(
-    model, diffusion_scheduler, val_loader, scheduler, device, criterion, epoch, tensorboard_path="./runs/diffusion"
+    model, diffusion_scheduler, val_loader, lr_scheduler, device, criterion, epoch, tensorboard_path="./runs/diffusion", altitude_conditioning=False
 ):
     tb_writer = SummaryWriter(tensorboard_path)
     model.eval()
 
     total_loss = 0
 
-    for i, (X, y) in enumerate(val_loader):
+    for i, (X, y, altitudes) in enumerate(val_loader):
         batch_size = X.size(0)
 
         timesteps = torch.randint(0, len(diffusion_scheduler.timesteps), (batch_size,)).long()
@@ -172,31 +159,48 @@ def evaluate(
         noise = noise.to(device)
         noisy_images = noisy_images.to(device)
 
-        predicted_noise = model(noisy_images, timesteps.to(device))[0]
+        if altitude_conditioning:
+            altitudes = altitudes.to(device)
+            predicted_noise = model(noisy_images, timesteps.to(device), class_labels=altitudes)[0]
+        else:
+            predicted_noise = model(noisy_images, timesteps.to(device))[0]
 
         loss = criterion(noise, predicted_noise)
         
         total_loss += loss.item()
 
     tb_writer.add_scalar("Loss/val", total_loss / len(val_loader), epoch)
-    scheduler.step(total_loss / len(val_loader))
+    lr_scheduler.step(total_loss / len(val_loader))
 
     print(f"Epoch {epoch} Validation Loss {total_loss / len(val_loader)}")
 
-    if epoch % 10 == 0:
+    if epoch % 5 == 0:
         print("Sampling image")
         pipeline = DDIMPipeline(unet=model, scheduler=diffusion_scheduler)
         
-        X, y = next(iter(val_loader))
-
+        X, y, altitudes = next(iter(val_loader))
         X = X.to(device)
         y = y.to(device)
+        altitudes = altitudes.to(device)
         
-        generated_images = pipeline(
-            X,
-            batch_size=X.shape[0],
-            num_inference_steps=100
-        )
+        if altitude_conditioning:
+            generated_images = pipeline(
+                X,
+                altitudes=altitudes,
+                batch_size=X.shape[0],
+                num_inference_steps=100
+            )
+        else:
+            generated_images = pipeline(
+                X,
+                batch_size=X.shape[0],
+                num_inference_steps=100
+            )
+            from simple_diffusion.scheduler import DDIMScheduler
+            diffusion_scheduler = DDIMScheduler(beta_schedule="cosine")
+
+            generated_images = diffusion_scheduler.generate(model, X, batch_size=X.shape[0], image_size=X.shape[2])[-1]
+            generated_images = 2 * generated_images - 1
         
         X = (X + 1) / 2
         y = (y + 1) / 2
@@ -228,8 +232,8 @@ if __name__ == "__main__":
     with open(root / 'train_valid_test_split.json', 'r') as f:
         split = json.load(f)
     
-    train_dataset = DSRDataset(root, split['train'], resolution=128, real_lr=True)
-    val_dataset = DSRDataset(root, split['test'], resolution=128, real_lr=True)
+    train_dataset = DSRDataset(root, split['train'], resolution=128, real_lr=False)
+    val_dataset = DSRDataset(root, split['test'], resolution=128, real_lr=False)
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
@@ -247,43 +251,45 @@ if __name__ == "__main__":
         prefetch_factor=2
     )
     
+    altitude_conditioning = True
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    
+    num_classes = len(train_dataset.ALTITUDES)
     
     model = UNet2DModel(
         sample_size=128,  # the target image resolution
         in_channels=6,  # the number of input channels, 3 for RGB images
         out_channels=3,  # the number of output channels
-        layers_per_block=3,  # how many ResNet layers to use per UNet block
-        block_out_channels=(128, 256, 512, 1024, 1024),  # the number of output channels for each UNet block
+        layers_per_block=2,  # how many ResNet layers to use per UNet block
+        block_out_channels=(64, 128, 256),  # the number of output channels for each UNet block
         norm_num_groups=1,
         down_block_types=(
             "DownBlock2D",  # a regular ResNet downsampling block
             "AttnDownBlock2D",  # a ResNet downsampling block with spatial self-attention
             "DownBlock2D",
-            "AttnDownBlock2D",
-            "DownBlock2D"
         ),
         up_block_types=(
             "UpBlock2D",  # a regular ResNet upsampling block
             "AttnUpBlock2D",  # a ResNet upsampling block with spatial self-attention
             "UpBlock2D",
-            "AttnUpBlock2D",
-            "UpBlock2D"
         ),
+        class_embed_type=None,
+        num_class_embeds=num_classes
     ).to(device)
     
-    epochs = 200
+    epochs = 50
     T = 2000
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     diffusion_scheduler = DDIMScheduler(num_train_timesteps=T, beta_schedule='squaredcos_cap_v2')
     lr_scheduler = get_constant_schedule(
         optimizer=optimizer
     )
+    
     criterion = nn.MSELoss()
-    tensorboard_path="./runs/diffusion-525M-dsr-true-128R-cosine-1e-4"
+    tensorboard_path="./runs/diffusion-14M-dsr-false-128R-height-cosine-1e-4"
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("Number of parameters:", num_params, device)
     
-    train(model, diffusion_scheduler, train_loader, val_loader, epochs, device, optimizer, lr_scheduler, criterion, tensorboard_path, num_accumulation_steps=4)
-    torch.save(model.state_dict(), 'models/dsr_sr_128.pth')
+    train(model, diffusion_scheduler, train_loader, val_loader, epochs, device, optimizer, lr_scheduler, criterion, tensorboard_path, num_accumulation_steps=4, altitude_conditioning=altitude_conditioning)
+    torch.save(model.state_dict(), 'models/dsr_sr_128_height.pth')

@@ -2,6 +2,8 @@
 
 echo "Starting training..."
 
+python -m pip install --upgrade pip
+
 pip install torchmetrics
 pip install diffusers[training]
 sudo pip uninstall -y transformer-engine

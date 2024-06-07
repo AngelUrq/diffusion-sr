@@ -26,6 +26,9 @@ class DSRDataset(torch.utils.data.Dataset):
         self.real_lr = real_lr
 
         self.pairs = []
+        
+        self.altitude_to_class = {altitude: i for i, altitude in enumerate(self.ALTITUDES)}
+        self.class_to_altitude = {i: altitude for i, altitude in enumerate(self.ALTITUDES)}
 
         for scene in scenes:
             if height is not None:
@@ -53,8 +56,8 @@ class DSRDataset(torch.utils.data.Dataset):
         directories.sort()
 
         for directory in directories:
-            pairs.append((filepath / directory / self.DEFAULT_IMAGE, filepath / directory / self.DEFAULT_TARGET))
-
+            pairs.append((filepath / directory / self.DEFAULT_IMAGE, filepath / directory / self.DEFAULT_TARGET, height))
+ 
         return pairs
         
     def load_image(self, path):
@@ -66,7 +69,7 @@ class DSRDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, idx):
         if self.real_lr:
-            image_path, target_path = self.pairs[idx]
+            image_path, target_path, altitude = self.pairs[idx]
             image = self.load_image(image_path) / 255.0
             target = self.load_image(target_path) / 255.0
 
@@ -90,10 +93,10 @@ class DSRDataset(torch.utils.data.Dataset):
             crop = torch.tensor((crop - 0.5) / 0.5).permute(2, 0, 1).float()
             crop_resized = torch.tensor((crop_resized - 0.5) / 0.5).permute(2, 0, 1).float()
             target = torch.tensor((target - 0.5) / 0.5).permute(2, 0, 1).float()
-
-            return crop_resized, target
+            
+            return crop_resized, target, self.altitude_to_class[altitude]
         else:
-            image_path, target_path = self.pairs[idx]
+            image_path, target_path, altitude = self.pairs[idx]
             target = self.load_image(target_path) / 255.0
 
             image = target[:512, :512]
@@ -113,5 +116,5 @@ class DSRDataset(torch.utils.data.Dataset):
 
             upscaled_image = torch.tensor(upscaled_image).permute(2, 0, 1).float()
             target = torch.tensor(target).permute(2, 0, 1).float()
-
-            return upscaled_image, target
+                     
+            return upscaled_image, target, self.altitude_to_class[altitude]

@@ -1,4 +1,4 @@
-# Adapted from https://github.com/huggingface/diffusers/blob/v0.28.0/src/diffusers/pipelines/ddim/pipeline_ddim.p
+# Adapted from https://github.com/huggingface/diffusers/blob/v0.28.0/src/diffusers/pipelines/ddim/pipeline_ddim.py
 
 import diffusers
 import torch
@@ -35,6 +35,7 @@ class DDIMPipeline(DiffusionPipeline):
     def __call__(
         self,
         X,
+        altitudes=None,
         batch_size: int = 1,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         eta: float = 0.0,
@@ -98,7 +99,11 @@ class DDIMPipeline(DiffusionPipeline):
         for t in self.progress_bar(self.scheduler.timesteps):
             # 1. predict noise model_output
             conditioned_image = torch.cat([image, X], dim=1).to(self.unet.device)
-            model_output = self.unet(conditioned_image, t).sample
+            
+            if altitudes is not None:
+                model_output = self.unet(conditioned_image, t, class_labels=altitudes).sample
+            else:
+                model_output = self.unet(conditioned_image, t).sample
 
             # 2. predict previous mean of image x_t-1 and add variance depending on eta
             # eta corresponds to η in paper and should be between [0, 1]
