@@ -21,6 +21,21 @@ This repository contains the implementation of a diffusion model for super-resol
 
 ## Usage
 
+### Files Description
+
+- `ddpm.ipynb`: Jupyter notebook for Denoising Diffusion Probabilistic Models (DDPM) implementation.
+- `diffusion.py`: Implementation of the diffusion scheduling.
+- `dsr.py`, `dsr_height.py`: Pytorch datasets for DSR.
+- `eda.ipynb`: Exploratory Data Analysis notebook.
+- `eval.ipynb`: Notebook for model evaluation.
+- `launch_tensorboard.sh`: Script to launch TensorBoard for monitoring training.
+- `launch_training.sh`: Script to launch the training process.
+- `model.py`: U-net implementation, not used in the final version. We adopted Diffusers implementation.
+- `samplers.py`: Contains sampling methods for the diffusion process.
+- `srd.py`: Pytorch dataset for flowers.
+- `super_resolution.ipynb`: Notebook demonstrating the super resolution process.
+- `train.py`, `train_height.py`: Training scripts.
+
 ### Running Training
 
 To run the training process, execute the following script:
